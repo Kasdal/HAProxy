@@ -1,0 +1,106 @@
+---
+- name: Update the Server
+  hosts: all
+  become: yes
+  tasks:
+    - name: Update apt repo and cache
+      ansible.builtin.apt: update_cache=yes force_apt_get=yes cache_valid_time=3600
+- name: Install HAProxy
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install HAProxy Package
+      apt: name=haproxy state=present
+    - name: Start HAProxy
+      service: name=haproxy state=started enabled=yes
+- name: Install Node.js
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install Node.js
+      apt:
+        name: nodejs
+        state: latest
+- name: Save the Code
+  hosts: all
+  become: yes
+  tasks:
+    - name: Create /srv Directory
+      file:
+        path: /srv
+        state: directory
+        mode: 0755
+- name: Save the Code
+  hosts: all
+  become: yes
+  tasks:
+    - name: Save the Code to /srv/server.js
+      copy:
+        dest: /srv/server.js
+        content: |
+          var http = require('http');
+          function serve(ip, port)
+          {
+           http.createServer(function (req, res) {
+           res.writeHead(200, {'Content-Type': 'text/plain'});
+           res.write(JSON.stringify(req.headers));
+           res.end("\nThere's no place like "+ip+":"+port+"\n");
+           }).listen(port, ip);
+           console.log('Server running at http://'+ip+':'+port+'/');
+          }
+          // Create three servers for
+          // the load balancer, listening on any
+          // network on the following three ports
+          serve('0.0.0.0', 9000);
+          serve('0.0.0.0', 9001);
+          serve('0.0.0.0', 9002);
+- name: Update HAProxy Configuration
+  hosts: all
+  become: yes
+
+  tasks:
+  - name: Add frontend configuration
+    lineinfile:
+      path: /etc/haproxy/haproxy.cfg
+      line: |
+        frontend localnodes
+        bind *:80
+        mode http
+        default_backend nodes
+    
+  - name: Add backend configuration
+    lineinfile:
+      path: /etc/haproxy/haproxy.cfg
+      line: |
+        backend nodes
+        mode http
+        balance roundrobin
+        option forwardfor
+        http-request set-header X-Forwarded-Port %[dst_port]
+        http-request add-header X-Forwarded-Proto https if { ssl_fc }
+        option httpchk HEAD / HTTP/1.1\r\nHost:localhost
+        server web01 127.0.0.1:9000 check
+        server web02 127.0.0.1:9001 check
+        server web03 127.0.0.1:9002 check
+
+  - name: Add stats listener configuration
+    lineinfile:
+      path: /etc/haproxy/haproxy.cfg
+      line: |
+        listen stats
+        bind *:1936
+        mode http
+        log global
+        stats enable
+        stats uri /
+        stats hide-version
+        stats auth someuser:password
+  - name: Restart HAProxy service
+    service:
+      name: haproxy
+      state: restarted
+      
+  - name: Start node server
+    command: node /srv/server.js
+    args:
+      creates: /srv/server.js
