@@ -1,0 +1,36 @@
+---
+- name: Update Ubuntu, install Apache and Varnish
+  hosts: all
+  become: true
+  tasks:
+  - name: Update Ubuntu
+    apt:
+      update_cache: yes
+      upgrade: dist
+  - name: Install Apache
+    apt:
+      name: apache2
+  - name: Install Varnish
+    apt:
+      name: varnish
+
+- name: Configure Apache and Varnish
+  hosts: all
+  become: true
+  tasks:
+  - name: Change Apache listen port
+    replace:
+      path: /etc/apache2/ports.conf
+      regexp: 'Listen 80'
+      replace: 'Listen 8080'
+  - name: Restart Apache
+    service:
+      name: apache2
+      state: restarted
+  - name: Start and enable Varnish
+    service:
+      name: varnish
+      state: started
+      enabled: yes
+  - name: Reload Varnish
+    command: systemctl reload varnish
